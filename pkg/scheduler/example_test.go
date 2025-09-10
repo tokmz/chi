@@ -168,26 +168,202 @@ func TaskWithRetryExample() {
 
 // CustomLoggerExample 展示如何使用自定义日志器
 func CustomLoggerExample() {
-	// 创建自定义日志器
-	logger := NewDefaultLogger(LogLevelInfo, nil, true)
-
+	// 创建自定义日志配置
 	config := DefaultSchedulerConfig()
-	config.LogLevel = LogLevelInfo
+	config.LogLevel = LogLevelDebug
+	config.EnableConsole = true
 
-	scheduler, _ := NewScheduler(config)
-	scheduler.Start()
+	// 创建调度器
+	scheduler, err := NewScheduler(config)
+	if err != nil {
+		log.Fatal("Failed to create scheduler:", err)
+	}
+
+	// 启动调度器
+	if err = scheduler.Start(); err != nil {
+		log.Fatal("Failed to start scheduler:", err)
+	}
 	defer scheduler.Stop()
 
-	task := NewTask("log-task", "Logging Task", func() (interface{}, error) {
-		logger.Info("Task is executing", map[string]interface{}{
-			"timestamp": time.Now(),
-			"task_id":   "log-task",
-		})
-		return "logged", nil
+	// 创建任务
+	task := NewTask("debug-task", "Debug Task", func() (interface{}, error) {
+		fmt.Println("Debug task with custom logger")
+		return "debug success", nil
 	})
-
 	task.SetInterval(3 * time.Second)
+
+	// 添加任务
 	scheduler.AddTask(task)
 
+	// 运行一段时间
 	time.Sleep(10 * time.Second)
+}
+
+// ZapLoggerExample 演示使用Zap高性能日志器
+func ZapLoggerExample() {
+	// 使用扩展日志配置
+	config := DefaultSchedulerConfig()
+	config.LoggerConfig = &LoggerConfig{
+		Level:         LogLevelInfo,
+		Output:        "logs/scheduler.log",
+		EnableConsole: true,
+		UseZapLogger:  true,
+		Format:        "json",
+		Development:   false,
+		File: FileLogConfig{
+			Enabled:    true,
+			Filename:   "logs/scheduler.log",
+			MaxSize:    100,
+			MaxBackups: 3,
+			MaxAge:     7,
+			Compress:   true,
+			LocalTime:  true,
+		},
+		Console: ConsoleLogConfig{
+			Enabled:    true,
+			Colorful:   true,
+			TimeFormat: "2006-01-02 15:04:05",
+		},
+	}
+
+	// 创建调度器
+	scheduler, err := NewScheduler(config)
+	if err != nil {
+		log.Fatal("Failed to create scheduler:", err)
+	}
+
+	// 启动调度器
+	if err = scheduler.Start(); err != nil {
+		log.Fatal("Failed to start scheduler:", err)
+	}
+	defer scheduler.Stop()
+
+	// 创建多个任务演示不同日志级别
+	tasks := []*Task{
+		NewTask("info-task", "Info Level Task", func() (interface{}, error) {
+			fmt.Println("Info level task executed")
+			return "info", nil
+		}),
+		NewTask("warn-task", "Warn Level Task", func() (interface{}, error) {
+			fmt.Println("Warn level task executed")
+			return "warn", fmt.Errorf("warning: this is a test warning")
+		}),
+		NewTask("error-task", "Error Level Task", func() (interface{}, error) {
+			return nil, fmt.Errorf("error: this is a test error")
+		}),
+	}
+
+	// 设置不同的执行间隔
+	tasks[0].SetInterval(15 * time.Second)
+	tasks[1].SetInterval(20 * time.Second)
+	tasks[2].SetInterval(25 * time.Second)
+
+	// 添加任务到调度器
+	for _, task := range tasks {
+		if err := scheduler.AddTask(task); err != nil {
+			log.Printf("Failed to add task %s: %v", task.ID, err)
+		}
+	}
+
+	time.Sleep(1 * time.Minute)
+}
+
+// DevelopmentLoggerExample 演示开发环境日志配置
+func DevelopmentLoggerExample() {
+	// 开发环境：详细日志，仅控制台输出，彩色显示
+	config := DefaultSchedulerConfig()
+	config.LoggerConfig = &LoggerConfig{
+		Level:         LogLevelDebug,
+		Output:        "", // 空字符串表示不输出到文件
+		EnableConsole: true,
+		UseZapLogger:  true,
+		Format:        "console",
+		Development:   true,
+		Console: ConsoleLogConfig{
+			Enabled:    true,
+			Colorful:   true,
+			TimeFormat: "15:04:05",
+		},
+	}
+
+	// 创建调度器
+	scheduler, err := NewScheduler(config)
+	if err != nil {
+		log.Fatal("Failed to create scheduler:", err)
+	}
+
+	// 启动调度器
+	if err = scheduler.Start(); err != nil {
+		log.Fatal("Failed to start scheduler:", err)
+	}
+	defer scheduler.Stop()
+
+	// 创建调试任务
+	task := NewTask("debug-task", "Debug Task", func() (interface{}, error) {
+		fmt.Println("Debug task with detailed logging")
+		return map[string]interface{}{
+			"timestamp": time.Now(),
+			"status":    "success",
+			"details":   "Task completed successfully",
+		}, nil
+	})
+	task.SetInterval(5 * time.Second)
+
+	if err := scheduler.AddTask(task); err != nil {
+		log.Fatal("Failed to add task:", err)
+	}
+
+	time.Sleep(30 * time.Second)
+}
+
+// LoggerMigrationExample 演示从基础日志配置迁移到扩展配置
+func LoggerMigrationExample() {
+	fmt.Println("=== 日志配置迁移示例 ===")
+
+	// 步骤1: 原有的基础配置
+	fmt.Println("步骤1: 使用基础日志配置")
+	oldConfig := DefaultSchedulerConfig()
+	oldConfig.LogLevel = LogLevelInfo
+
+	s1, err := NewScheduler(oldConfig)
+	if err != nil {
+		log.Fatal("Failed to create scheduler with old config:", err)
+	}
+	s1.Start()
+	time.Sleep(5 * time.Second)
+	s1.Stop()
+
+	// 步骤2: 迁移到扩展配置
+	fmt.Println("步骤2: 迁移到扩展日志配置")
+	newConfig := DefaultSchedulerConfig()
+	// 保留原有基础配置作为后备
+	newConfig.LogLevel = LogLevelInfo
+	// 添加扩展配置（优先级更高）
+	newConfig.LoggerConfig = &LoggerConfig{
+		Level:         LogLevelInfo,
+		Output:        "logs/migrated.log",
+		EnableConsole: true,
+		UseZapLogger:  true,
+		Format:        "json",
+		Development:   false,
+		File: FileLogConfig{
+			Enabled:    true,
+			Filename:   "logs/migrated.log",
+			MaxSize:    50,
+			MaxBackups: 3,
+			MaxAge:     7,
+			Compress:   true,
+			LocalTime:  true,
+		},
+	}
+
+	s2, err := NewScheduler(newConfig)
+	if err != nil {
+		log.Fatal("Failed to create scheduler with new config:", err)
+	}
+	s2.Start()
+	time.Sleep(5 * time.Second)
+	s2.Stop()
+
+	fmt.Println("迁移完成！现在使用高性能Zap日志器")
 }

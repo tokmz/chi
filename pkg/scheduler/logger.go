@@ -6,6 +6,8 @@ import (
 	"log"
 	"os"
 	"time"
+
+	"chi/pkg/logger"
 )
 
 // LogLevel 日志级别
@@ -187,6 +189,12 @@ type LoggerFactory struct{}
 
 // CreateLogger 创建日志器
 func (f *LoggerFactory) CreateLogger(config *SchedulerConfig) (Logger, error) {
+	// 优先使用新的zap logger
+	if config.UseZapLogger {
+		return f.createZapLogger(config)
+	}
+
+	// 兼容旧的日志实现
 	if config.LogOutput == "" {
 		// 只输出到控制台或不输出
 		if config.EnableConsole {
@@ -197,4 +205,61 @@ func (f *LoggerFactory) CreateLogger(config *SchedulerConfig) (Logger, error) {
 
 	// 输出到文件
 	return NewFileLogger(config.LogLevel, config.LogOutput, config.EnableConsole)
+}
+
+// createZapLogger 创建基于zap的日志器
+func (f *LoggerFactory) createZapLogger(config *SchedulerConfig) (Logger, error) {
+	// 如果有扩展日志配置，优先使用
+	if config.LoggerConfig != nil {
+		return NewLoggerFromConfig(config.LoggerConfig)
+	}
+
+	// 使用基础配置创建logger配置
+	loggerConfig := &logger.Config{
+		Level:       f.convertLogLevel(config.LogLevel),
+		Format:      "json",
+		Development: false,
+		Output: logger.OutputConfig{
+			Console: logger.ConsoleConfig{
+				Enabled:    config.EnableConsole,
+				Colorful:   true,
+				TimeFormat: "2006-01-02 15:04:05",
+			},
+			File: logger.FileConfig{
+				Enabled:  config.LogOutput != "",
+				Filename: config.LogOutput,
+				MaxSize:  100, // 100MB
+				MaxBackups: 3,
+				MaxAge:   7, // 7天
+				Compress: true,
+				LocalTime: true,
+			},
+		},
+		Caller: logger.CallerConfig{
+			Enabled:  true,
+			FullPath: false,
+			Skip:     1,
+		},
+	}
+
+	// 创建适配器
+	return NewLoggerAdapterWithConfig(loggerConfig, config.LogLevel)
+}
+
+// convertLogLevel 转换日志级别
+func (f *LoggerFactory) convertLogLevel(level LogLevel) string {
+	switch level {
+	case LogLevelDebug:
+		return "debug"
+	case LogLevelInfo:
+		return "info"
+	case LogLevelWarn:
+		return "warn"
+	case LogLevelError:
+		return "error"
+	case LogLevelFatal:
+		return "fatal"
+	default:
+		return "info"
+	}
 }

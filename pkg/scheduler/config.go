@@ -16,6 +16,10 @@ type SchedulerConfig struct {
 	LogLevel      LogLevel // 日志级别
 	LogOutput     string   // 日志输出路径
 	EnableConsole bool     // 是否启用控制台输出
+	UseZapLogger  bool     // 是否使用zap日志库（推荐）
+	
+	// 扩展日志配置（可选，优先级高于上述基础配置）
+	LoggerConfig *LoggerConfig `json:"logger_config,omitempty" yaml:"logger_config,omitempty"`
 
 	// 监控配置
 	EnableMonitor   bool          // 是否启用监控
@@ -46,6 +50,7 @@ func DefaultSchedulerConfig() *SchedulerConfig {
 		LogLevel:      LogLevelInfo,
 		LogOutput:     "", // 空字符串表示不输出到文件
 		EnableConsole: true,
+		UseZapLogger:  true, // 默认使用zap日志库
 
 		// 监控配置
 		EnableMonitor:   true,
@@ -116,6 +121,7 @@ func (c *SchedulerConfig) Clone() *SchedulerConfig {
 		LogLevel:          c.LogLevel,
 		LogOutput:         c.LogOutput,
 		EnableConsole:     c.EnableConsole,
+		UseZapLogger:      c.UseZapLogger,
 		EnableMonitor:     c.EnableMonitor,
 		MonitorInterval:   c.MonitorInterval,
 		MetricsEnabled:    c.MetricsEnabled,

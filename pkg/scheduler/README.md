@@ -66,6 +66,9 @@ scheduler/
 - 支持控制台和文件输出
 - 结构化日志格式
 - 异步日志处理能力
+- **扩展日志配置**：支持高级日志配置选项，优先级高于基础配置
+- **多种日志适配器**：支持默认日志器和Zap高性能日志器
+- **灵活的日志工厂**：统一的日志器创建接口，支持不同类型的日志器
 
 ### 6. Config（配置管理）
 - **SchedulerConfig**：调度器主配置
@@ -93,6 +96,20 @@ func main() {
     config := scheduler.DefaultSchedulerConfig()
     config.MaxWorkers = 5
     config.QueueSize = 100
+    
+    // 配置扩展日志（可选）
+    config.LoggerConfig = &scheduler.LoggerConfig{
+        Type:  "zap",
+        Level: "info",
+        Output: []string{"console", "file"},
+        File: &scheduler.FileConfig{
+            Filename:   "scheduler.log",
+            MaxSize:    100,
+            MaxBackups: 3,
+            MaxAge:     7,
+            Compress:   true,
+        },
+    }
 
     // 创建调度器
     s, err := scheduler.NewScheduler(config)
@@ -176,6 +193,58 @@ delay := scheduler.NewTask("delay-task", "Delay Task", func() (interface{}, erro
     return nil, nil
 })
 delay.SetDelay(1 * time.Minute)
+```
+
+### 日志配置示例
+
+```go
+// 使用默认日志器（简单配置）
+config := scheduler.DefaultSchedulerConfig()
+config.LogLevel = scheduler.LogLevelInfo
+
+// 使用Zap高性能日志器（推荐用于生产环境）
+config.LoggerConfig = &scheduler.LoggerConfig{
+    Type:   "zap",
+    Level:  "info",
+    Format: "json",
+    Output: []string{"console", "file"},
+    File: &scheduler.FileConfig{
+        Filename:   "logs/scheduler.log",
+        MaxSize:    100, // 100MB
+        MaxBackups: 5,
+        MaxAge:     30, // 30天
+        Compress:   true,
+    },
+    Console: &scheduler.ConsoleConfig{
+        ColorOutput: true,
+    },
+}
+
+// 仅控制台输出（开发环境）
+devConfig := &scheduler.LoggerConfig{
+    Type:   "zap",
+    Level:  "debug",
+    Format: "text",
+    Output: []string{"console"},
+    Console: &scheduler.ConsoleConfig{
+        ColorOutput: true,
+    },
+}
+
+// 仅文件输出（生产环境）
+prodConfig := &scheduler.LoggerConfig{
+    Type:   "zap",
+    Level:  "warn",
+    Format: "json",
+    Output: []string{"file"},
+    File: &scheduler.FileConfig{
+        Filename:   "/var/log/scheduler/app.log",
+        MaxSize:    500,
+        MaxBackups: 10,
+        MaxAge:     90,
+        Compress:   true,
+    },
+}
 ```
 
 ## 使用场景
@@ -272,11 +341,36 @@ type SchedulerConfig struct {
     QueueSize       int           // 任务队列大小
     TickInterval    time.Duration // 调度检查间隔
     ShutdownTimeout time.Duration // 关闭超时时间
-    LogLevel        LogLevel      // 日志级别
+    LogLevel        LogLevel      // 日志级别（基础配置）
     EnableMonitor   bool          // 是否启用监控
     MonitorInterval time.Duration // 监控检查间隔
     PanicRecovery   bool          // 是否启用panic恢复
+    LoggerConfig    *LoggerConfig // 扩展日志配置（优先级高于基础配置）
     // ... 更多配置选项
+}
+
+// 扩展日志配置
+type LoggerConfig struct {
+    Type     string        `json:"type" yaml:"type"`         // 日志器类型: "default" 或 "zap"
+    Level    string        `json:"level" yaml:"level"`       // 日志级别: "debug", "info", "warn", "error"
+    Output   []string      `json:"output" yaml:"output"`     // 输出目标: ["console", "file"]
+    Format   string        `json:"format" yaml:"format"`     // 日志格式: "json" 或 "text"
+    File     *FileConfig   `json:"file,omitempty" yaml:"file,omitempty"`     // 文件输出配置
+    Console  *ConsoleConfig `json:"console,omitempty" yaml:"console,omitempty"` // 控制台输出配置
+}
+
+// 文件日志配置
+type FileConfig struct {
+    Filename   string `json:"filename" yaml:"filename"`     // 日志文件名
+    MaxSize    int    `json:"maxsize" yaml:"maxsize"`       // 最大文件大小(MB)
+    MaxBackups int    `json:"maxbackups" yaml:"maxbackups"` // 最大备份文件数
+    MaxAge     int    `json:"maxage" yaml:"maxage"`         // 最大保留天数
+    Compress   bool   `json:"compress" yaml:"compress"`     // 是否压缩备份文件
+}
+
+// 控制台日志配置
+type ConsoleConfig struct {
+    ColorOutput bool `json:"color" yaml:"color"` // 是否启用彩色输出
 }
 ```
 
