@@ -35,6 +35,11 @@ var (
 	ErrIndexNotFound       = errors.New("index not found")
 
 	// 集合相关错误
-	ErrCollectionNotFound = errors.New("collection not found")
-	ErrCollectionExists   = errors.New("collection already exists")
+ErrCollectionNotFound = errors.New("collection not found")
+ErrCollectionExists   = errors.New("collection already exists")
+
+// 日志相关错误
+ErrInvalidLogLevel = errors.New("invalid log level")
+ErrNoLogOutput     = errors.New("no log output configured")
+ErrInvalidLogFile  = errors.New("invalid log file configuration")
 )

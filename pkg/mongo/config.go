@@ -16,8 +16,10 @@ type Config struct {
 	Database string `json:"database" yaml:"database" mapstructure:"database"`
 	// 连接池配置
 	Pool PoolConfig `json:"pool" yaml:"pool" mapstructure:"pool"`
-	// 日志配置
+	// 日志配置 (兼容旧版本)
 	Log LogConfig `json:"log" yaml:"log" mapstructure:"log"`
+	// 扩展日志配置 (新版本)
+	Logger *MongoLoggerConfig `json:"logger,omitempty" yaml:"logger,omitempty" mapstructure:"logger"`
 	// 读写配置
 	ReadWrite ReadWriteConfig `json:"read_write" yaml:"read_write" mapstructure:"read_write"`
 	// 超时配置
@@ -135,6 +137,32 @@ func DefaultConfig() *Config {
 			Enabled: false,
 		},
 	}
+}
+
+// GetLoggerConfig 获取有效的日志配置
+// 优先使用新的Logger配置，如果没有则使用旧的Log配置
+func (c *Config) GetLoggerConfig() *MongoLoggerConfig {
+	if c.Logger != nil {
+		return c.Logger
+	}
+	
+	// 从旧的Log配置转换为新的Logger配置
+	loggerConfig := DefaultMongoLoggerConfig()
+	
+	// 设置日志级别
+	loggerConfig.Level = ParseLogLevel(c.Log.Level)
+	
+	// 设置慢查询配置
+	loggerConfig.Mongo.SlowQuery.Enabled = c.Log.SlowQuery
+	loggerConfig.Mongo.SlowQuery.Threshold = c.Log.SlowQueryThreshold
+	
+	// 如果旧配置禁用了日志，则禁用控制台和文件输出
+	if !c.Log.Enabled {
+		loggerConfig.EnableConsole = false
+		loggerConfig.File.Enabled = false
+	}
+	
+	return loggerConfig
 }
 
 // ToClientOptions 将配置转换为MongoDB客户端选项

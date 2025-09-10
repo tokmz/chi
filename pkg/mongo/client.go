@@ -13,12 +13,13 @@ import (
 
 // Client MongoDB客户端
 type Client struct {
-	client   *mongo.Client
-	database *mongo.Database
-	config   *Config
-	logger   Logger
-	mu       sync.RWMutex
-	closed   bool
+	client           *mongo.Client
+	database         *mongo.Database
+	config           *Config
+	logger           Logger
+	slowQueryMonitor *SlowQueryMonitor
+	mu               sync.RWMutex
+	closed           bool
 }
 
 // NewClient 创建MongoDB客户端
@@ -41,15 +42,29 @@ func NewClient(config *Config) (*Client, error) {
 		return nil, fmt.Errorf("failed to connect to MongoDB: %w", err)
 	}
 
-	// 创建客户端实例
-	c := &Client{
-		client:   client,
-		database: client.Database(config.Database),
-		config:   config,
-		logger:   NewLogger(config.Log),
+	// 创建日志记录器
+	loggerConfig := config.GetLoggerConfig()
+	logger, err := NewMongoLoggerFromConfig(loggerConfig)
+	if err != nil {
+		// 如果创建新日志记录器失败，回退到默认日志记录器
+		logger = NewLogger(config.Log)
 	}
 
-	// 测试连接
+	// 创建慢查询监控器
+	slowQueryMonitor := NewSlowQueryMonitor(logger, loggerConfig.Mongo.SlowQuery.Threshold)
+	if !loggerConfig.Mongo.SlowQuery.Enabled {
+		slowQueryMonitor.Disable()
+	}
+
+	// 创建客户端实例
+	c := &Client{
+		client:           client,
+		database:         client.Database(config.Database),
+		config:           config,
+		logger:           logger,
+		slowQueryMonitor: slowQueryMonitor,
+		closed:           false,
+	}// 测试连接
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -200,6 +215,73 @@ func (c *Client) GetLogger() Logger {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.logger
+}
+
+// UpdateLoggerConfig 更新日志配置
+func (c *Client) UpdateLoggerConfig(loggerConfig *MongoLoggerConfig) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.closed {
+		return ErrConnectionClosed
+	}
+
+	// 创建新的日志记录器
+	newLogger, err := NewMongoLoggerFromConfig(loggerConfig)
+	if err != nil {
+		return fmt.Errorf("failed to create logger: %w", err)
+	}
+
+	// 更新配置中的日志配置
+	c.config.Logger = loggerConfig
+
+	// 更新日志记录器
+	c.logger = newLogger
+
+	c.logger.Info("Logger configuration updated successfully")
+	return nil
+}
+
+// GetLoggerConfig 获取当前日志配置
+func (c *Client) GetLoggerConfig() *MongoLoggerConfig {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.config.GetLoggerConfig()
+}
+
+// GetSlowQueryMonitor 获取慢查询监控器
+func (c *Client) GetSlowQueryMonitor() *SlowQueryMonitor {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.slowQueryMonitor
+}
+
+// GetSlowQueryStats 获取慢查询统计信息
+func (c *Client) GetSlowQueryStats() SlowQueryStats {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if c.slowQueryMonitor == nil {
+		return SlowQueryStats{}
+	}
+	return c.slowQueryMonitor.GetStats()
+}
+
+// ResetSlowQueryStats 重置慢查询统计信息
+func (c *Client) ResetSlowQueryStats() {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if c.slowQueryMonitor != nil {
+		c.slowQueryMonitor.ResetStats()
+	}
+}
+
+// SetSlowQueryThreshold 设置慢查询阈值
+func (c *Client) SetSlowQueryThreshold(threshold time.Duration) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if c.slowQueryMonitor != nil {
+		c.slowQueryMonitor.SetThreshold(threshold)
+	}
 }
 
 // WithContext 创建带上下文的操作
