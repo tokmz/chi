@@ -1,6 +1,7 @@
 package database
 
 import (
+	"errors"
 	"time"
 
 	"gorm.io/gorm/logger"
@@ -52,10 +53,29 @@ type SlowQueryConfig struct {
 	Threshold time.Duration `json:"threshold" yaml:"threshold" mapstructure:"threshold"`
 }
 
+// PerformanceConfig 性能监控配置
+type PerformanceConfig struct {
+	// 是否启用
+	Enabled bool `json:"enabled" yaml:"enabled" mapstructure:"enabled"`
+	// 监控间隔
+	Interval time.Duration `json:"interval" yaml:"interval" mapstructure:"interval"`
+	// 统计窗口大小
+	StatsWindow time.Duration `json:"stats_window" yaml:"stats_window" mapstructure:"stats_window"`
+	// 是否记录连接池状态
+	LogConnectionPool bool `json:"log_connection_pool" yaml:"log_connection_pool" mapstructure:"log_connection_pool"`
+}
+
+// 错误定义
+var (
+	ErrInvalidMaster     = errors.New("invalid master connection string")
+	ErrInvalidPoolConfig = errors.New("invalid pool configuration")
+	ErrInvalidTimeout    = errors.New("invalid timeout configuration")
+)
+
 // DefaultConfig 返回默认配置
 func DefaultConfig() *Config {
 	return &Config{
-		Master: "",
+		Master: "root:password@tcp(localhost:3306)/test?charset=utf8mb4&parseTime=True&loc=Local",
 		Slaves: []string{},
 		Pool: PoolConfig{
 			MaxIdleConns:    10,
@@ -74,4 +94,33 @@ func DefaultConfig() *Config {
 			Threshold: time.Millisecond * 200,
 		},
 	}
+}
+
+// Validate 验证配置
+func (c *Config) Validate() error {
+	if c.Master == "" {
+		return ErrInvalidMaster
+	}
+
+	if c.Pool.MaxIdleConns < 0 {
+		c.Pool.MaxIdleConns = 10
+	}
+
+	if c.Pool.MaxOpenConns <= 0 {
+		c.Pool.MaxOpenConns = 100
+	}
+
+	if c.Pool.MaxIdleConns > c.Pool.MaxOpenConns {
+		c.Pool.MaxIdleConns = c.Pool.MaxOpenConns
+	}
+
+	if c.Pool.ConnMaxLifetime <= 0 {
+		c.Pool.ConnMaxLifetime = time.Hour
+	}
+
+	if c.Pool.ConnMaxIdleTime <= 0 {
+		c.Pool.ConnMaxIdleTime = 30 * time.Minute
+	}
+
+	return nil
 }

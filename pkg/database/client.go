@@ -3,6 +3,7 @@ package database
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
@@ -12,8 +13,9 @@ import (
 
 // Client 数据库客户端
 type Client struct {
-	db     *gorm.DB
-	config *Config
+	db            *gorm.DB
+	config        *Config
+	loggerAdapter *DatabaseLoggerAdapter
 }
 
 // NewClient 创建数据库客户端
@@ -27,9 +29,16 @@ func NewClient(config *Config) (*Client, error) {
 		return nil, fmt.Errorf("invalid config: %w", err)
 	}
 
+	// 创建日志适配器
+	loggerConfig := DefaultDatabaseLoggerConfig()
+	loggerAdapter, err := NewDatabaseLoggerAdapter(loggerConfig)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create logger adapter: %w", err)
+	}
+
 	// 创建GORM配置
 	gormConfig := &gorm.Config{
-		Logger: NewCustomLogger(config.Log, config.SlowQuery),
+		Logger: loggerAdapter,
 	}
 
 	// 连接主库
@@ -51,8 +60,17 @@ func NewClient(config *Config) (*Client, error) {
 
 
 	client := &Client{
-		db:     db,
-		config: config,
+		db:            db,
+		config:        config,
+		loggerAdapter: loggerAdapter,
+	}
+
+	// 启动监控器
+	if loggerAdapter.slowMonitor != nil {
+		loggerAdapter.slowMonitor.Start()
+	}
+	if loggerAdapter.perfMonitor != nil {
+		loggerAdapter.perfMonitor.Start()
 	}
 
 	return client, nil
@@ -118,6 +136,14 @@ func (c *Client) DB() *gorm.DB {
 
 // Close 关闭数据库连接
 func (c *Client) Close() error {
+	// 关闭日志适配器
+	if c.loggerAdapter != nil {
+		if err := c.loggerAdapter.Close(); err != nil {
+			// 记录错误但不阻止关闭数据库连接
+			fmt.Printf("Failed to close logger adapter: %v\n", err)
+		}
+	}
+
 	sqlDB, err := c.db.DB()
 	if err != nil {
 		return fmt.Errorf("failed to get sql.DB: %w", err)
@@ -219,23 +245,23 @@ func (c *Client) HealthCheck(ctx context.Context) error {
 	return nil
 }
 
-// GetSlowQueries 获取慢查询统计（需要数据库支持）
+// GetSlowQueries 获取慢查询列表
 func (c *Client) GetSlowQueries(ctx context.Context, limit int) ([]map[string]interface{}, error) {
+	// 这里需要根据具体的数据库实现来获取慢查询
+	// MySQL可以查询performance_schema.events_statements_summary_by_digest
+	// 这里提供一个示例实现
 	var results []map[string]interface{}
 	
-	// 查询MySQL慢查询日志表（需要开启慢查询日志）
 	query := `
 		SELECT 
-			start_time,
-			user_host,
-			query_time,
-			lock_time,
-			rows_sent,
-			rows_examined,
-			db,
-			sql_text
-		FROM mysql.slow_log 
-		ORDER BY start_time DESC 
+			DIGEST_TEXT as sql_text,
+			COUNT_STAR as exec_count,
+			AVG_TIMER_WAIT/1000000000 as avg_time_ms,
+			MAX_TIMER_WAIT/1000000000 as max_time_ms,
+			SUM_ROWS_EXAMINED as total_rows_examined
+		FROM performance_schema.events_statements_summary_by_digest 
+		WHERE DIGEST_TEXT IS NOT NULL 
+		ORDER BY AVG_TIMER_WAIT DESC 
 		LIMIT ?
 	`
 	
@@ -244,4 +270,69 @@ func (c *Client) GetSlowQueries(ctx context.Context, limit int) ([]map[string]in
 	}
 	
 	return results, nil
+}
+
+// GetLoggerAdapter 获取日志适配器
+func (c *Client) GetLoggerAdapter() *DatabaseLoggerAdapter {
+	return c.loggerAdapter
+}
+
+// GetSlowQueryMonitor 获取慢查询监控器
+func (c *Client) GetSlowQueryMonitor() *DatabaseSlowQueryMonitor {
+	if c.loggerAdapter != nil {
+		return c.loggerAdapter.GetSlowQueryMonitor()
+	}
+	return nil
+}
+
+// GetPerformanceMonitor 获取性能监控器
+func (c *Client) GetPerformanceMonitor() *DatabasePerformanceMonitor {
+	if c.loggerAdapter != nil {
+		return c.loggerAdapter.GetPerformanceMonitor()
+	}
+	return nil
+}
+
+// GetSlowQueryStats 获取慢查询统计信息
+func (c *Client) GetSlowQueryStats() *SlowQueryStats {
+	monitor := c.GetSlowQueryMonitor()
+	if monitor != nil {
+		stats := monitor.GetStats()
+		return &stats
+	}
+	return nil
+}
+
+// GetPerformanceStats 获取性能统计信息
+func (c *Client) GetPerformanceStats() *PerformanceStats {
+	monitor := c.GetPerformanceMonitor()
+	if monitor != nil {
+		stats := monitor.GetStats()
+		return &stats
+	}
+	return nil
+}
+
+// ResetSlowQueryStats 重置慢查询统计
+func (c *Client) ResetSlowQueryStats() {
+	monitor := c.GetSlowQueryMonitor()
+	if monitor != nil {
+		monitor.Reset()
+	}
+}
+
+// ResetPerformanceStats 重置性能统计
+func (c *Client) ResetPerformanceStats() {
+	monitor := c.GetPerformanceMonitor()
+	if monitor != nil {
+		monitor.Reset()
+	}
+}
+
+// SetSlowQueryThreshold 设置慢查询阈值
+func (c *Client) SetSlowQueryThreshold(threshold time.Duration) {
+	monitor := c.GetSlowQueryMonitor()
+	if monitor != nil {
+		monitor.SetThreshold(threshold)
+	}
 }
